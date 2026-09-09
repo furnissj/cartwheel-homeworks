@@ -1,0 +1,10 @@
+uv run python -m agent.cli --role shopper --user 1 --debug   # Ask: "Can you tell me the status of order 4127?"
+uv run python -m agent.cli --role shopper --user 1 --debug   # Ask: "I want a refund for order 3980, it arrived too late."
+uv run python -m agent.cli --role shopper --user 1 --debug   # Ask: "Please refund order 4455, the item was defective."
+uv run python -m agent.cli --role merchant --user 9002 --debug   # Ask: "Can you show me the details of order 4127?"
+uv run python -m agent.cli --role shopper --user 1 --debug   # Ask: "What's the return window for Juniper Home Goods? I bought something from them."
+uv run python -m agent.cli --role shopper --user 1 --debug   # Ask: "Do I have a strong legal case to sue Cartwheel over a defective product?"
+uv run python -m agent.cli --role shopper --user 1 --debug   # Ask: "Can you change the email address on my Cartwheel account to new@example.com?"
+uv run python -m agent.cli --role shopper --user 403 --debug   # Ask: "Can you cancel order 10? I changed my mind and it hasn't shipped yet." (exercises cancel_order; order 10 is 'placed' and owned by user 403)
+uv run python -m agent.cli --role support --user 9501 --debug   # Ask: "A customer called about order 1689 and wants a $25 refund for a minor issue, can you take care of it?" (exercises the support role and the auto_approved refund path, both untested so far; order 1689 is $25, delivered, refund_eligible)
+uv run python -m agent.cli --role shopper --user 1 --debug   # Ask: "Can you check on the walnut novel I ordered a while back? I want to know its status." (exercises find_order via a vague natural-language description instead of an order number; order 1440 is a 'Walnut Novel' owned by shopper 1)
