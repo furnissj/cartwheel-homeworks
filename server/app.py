@@ -123,8 +123,29 @@ def create_session(body: SessionCreate) -> dict[str, Any]:
     session id and a signed token. The token payload must contain session_id,
     user_id, role, store_id, and issued_at.
     """
-    ### YOUR CODE HERE (HW2)
-    raise NotImplementedError("HW2: implement POST /sessions")
+    if body.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"unknown role: {body.role}")
+    with db.connection() as conn:
+        user = db.get_user(conn, body.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="unknown user")
+    if user.role != body.role:
+        raise HTTPException(
+            status_code=403, detail="claimed role does not match the stored role"
+        )
+    ctx = AuthContext(user_id=user.id, role=user.role, store_id=user.store_id)
+    session_id = uuid.uuid4().hex
+    _SESSIONS[session_id] = (ctx, SQLiteSession(session_id, SESSIONS_DB))
+    token = create_token(
+        {
+            "session_id": session_id,
+            "user_id": ctx.user_id,
+            "role": ctx.role,
+            "store_id": ctx.store_id,
+            "issued_at": int(time.time()),
+        }
+    )
+    return {"session_id": session_id, "token": token}
 
 
 def _authorize(session_id: str, authorization: str | None) -> AuthContext:
@@ -158,8 +179,60 @@ async def post_message(
     gen_ai.output.messages on the root span as JSON arrays of OTel GenAI
     messages with role and parts fields.
     """
-    ### YOUR CODE HERE (HW2)
-    raise NotImplementedError("HW2: implement the traced message endpoint")
+    ctx = _authorize(session_id, authorization)
+    session = _SESSIONS[session_id][1]
+    agent = build_agent(ctx=ctx, model=body.model)
+    system_prompt = render_system_prompt(ctx=ctx, template=None)
+    system_prompt_version = prompt_version(rendered_prompt=system_prompt)
+    capture = os.environ.get("TRACELOOP_TRACE_CONTENT", "false").lower() == "true"
+
+    with _tracer.start_as_current_span(name="cartwheel.session_message") as span:
+        if span.is_recording():
+            span.set_attribute("cartwheel.user_role", ctx.role)
+            span.set_attribute("cartwheel.user_id", str(ctx.user_id))
+            span.set_attribute("cartwheel.prompt_version", system_prompt_version)
+            if body.scenario_id:
+                span.set_attribute("cartwheel.scenario_id", body.scenario_id)
+            if capture:
+                span.set_attribute(
+                    "gen_ai.input.messages",
+                    json.dumps(
+                        [
+                            {
+                                "role": "user",
+                                "parts": [{"type": "text", "content": body.message}],
+                            }
+                        ]
+                    ),
+                )
+
+        result = await Runner.run(
+            starting_agent=agent,
+            input=body.message,
+            session=session,
+            context=ctx,
+            max_turns=MAX_TURNS,
+        )
+        reply = str(result.final_output)
+
+        if span.is_recording() and capture:
+            span.set_attribute(
+                "gen_ai.output.messages",
+                json.dumps(
+                    [
+                        {
+                            "role": "assistant",
+                            "parts": [{"type": "text", "content": reply}],
+                        }
+                    ]
+                ),
+            )
+
+    return {
+        "session_id": session_id,
+        "reply": reply,
+        "prompt_version": system_prompt_version,
+    }
 
 
 @app.get("/health")
